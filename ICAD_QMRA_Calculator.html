@@ -1,0 +1,209 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>ICAD QMRA Risk Calculator (MYRIAD Post‑hoc)</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 24px; line-height: 1.4; }
+  h1 { font-size: 20px; margin-bottom: 8px; }
+  .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; }
+  .col { flex: 1 1 260px; min-width: 240px; }
+  label { display: block; font-weight: 600; margin: 8px 0 4px; }
+  input[type="number"] { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 8px; }
+  input[type="checkbox"], input[type="radio"] { transform: scale(1.1); margin-right: 6px; }
+  .help { font-size: 12px; color: #555; }
+  .btn { display: inline-block; padding: 10px 16px; border-radius: 8px; border: 1px solid #222; background: #f5f5f5; cursor: pointer; font-weight: 600; }
+  .btn:hover { background: #eee; }
+  .result { font-size: 16px; padding: 12px; border-radius: 8px; border: 1px solid #ccc; background: #fafafa; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; border: 1px solid #999; margin-left: 6px; }
+  .tag.high { background: #ffe5e5; border-color: #f00; color: #900; }
+  .tag.low { background: #e6ffe6; border-color: #0a0; color: #060; }
+  .tag.intermediate { background: #fff5e6; border-color: #f90; color: #a60; }
+  .muted { color: #666; font-size: 12px; }
+  .small { font-size: 12px; }
+</style>
+</head>
+<body>
+  <h1>ICAD QMRA Risk Calculator (MYRIAD Post‑hoc)</h1>
+  <div class="muted">Applies the MYRIAD post‑hoc algorithm using NOVA QMRA regional flow (distal MCA + hemispheric) with age‑normalized cutoffs.</div>
+
+  <div class="card">
+    <div class="row">
+      <div class="col">
+        <label>Age (years)</label>
+        <input id="age" type="number" min="18" max="110" step="1" placeholder="e.g., 65"/>
+      </div>
+      <div class="col">
+        <label>Borderzone infarct present?</label>
+        <div>
+          <label style="font-weight:500;"><input type="radio" name="bz" value="yes">Yes</label>
+          <label style="font-weight:500; margin-left:12px;"><input type="radio" name="bz" value="no" checked>No</label>
+        </div>
+        <div class="help">Based on baseline MRI/CT pattern.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0;">Inputs for Symptomatic Hemisphere</h3>
+    <div class="row">
+      <div class="col">
+        <label>MCA (M1) flow (mL/min)</label>
+        <input id="mca" type="number" min="0" step="1" placeholder="e.g., 120"/>
+      </div>
+      <div class="col">
+        <label>ACA A2 flow (mL/min)</label>
+        <input id="aca" type="number" min="0" step="1" placeholder="If unknown, use helper below"/>
+        <div class="help">If A2 not measured: derive from A1 (see helper).</div>
+      </div>
+      <div class="col">
+        <label>PCA (P2) flow (mL/min)</label>
+        <input id="pca" type="number" min="0" step="1" placeholder="e.g., 80"/>
+      </div>
+    </div>
+    <details style="margin-top:10px;">
+      <summary><b>ACA A2 helper</b> (if A2 not directly available)</summary>
+      <div class="row" style="margin-top:10px;">
+        <div class="col">
+          <label>Ipsilateral A1 (mL/min)</label>
+          <input id="a1_ipsi" type="number" min="0" step="1" placeholder="e.g., 90"/>
+        </div>
+        <div class="col">
+          <label>Contralateral A1 (mL/min)</label>
+          <input id="a1_contra" type="number" min="0" step="1" placeholder="e.g., 110"/>
+        </div>
+        <div class="col">
+          <label><input id="a1_hypo" type="checkbox"> Ipsilateral A1 hypoplastic</label>
+          <div class="help">If checked → use contralateral A1 ÷ 2 to estimate A2.</div>
+        </div>
+      </div>
+      <button class="btn" onclick="deriveA2()">Fill A2 from A1</button>
+      <div class="help" id="a2msg" style="margin-top:6px;"></div>
+    </details>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0;">Calculated Hemispheric Flow</h3>
+    <div class="row">
+      <div class="col">
+        <label>Hemispheric Flow (M1 + A2 + P2)</label>
+        <input id="hemis" type="number" readonly placeholder="Auto-calculated"/>
+        <div class="help small">We add flows distal to the Circle of Willis to best reflect territorial supply beyond the stenosis.</div>
+      </div>
+      <div class="col">
+        <label>Age group thresholds used</label>
+        <div id="cutoffs" class="result small">—</div>
+      </div>
+    </div>
+    <button class="btn" onclick="calculate()">Calculate</button>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0;">Risk Interpretation</h3>
+    <div id="risk" class="result">Enter values and click <b>Calculate</b>.</div>
+    <div class="muted" style="margin-top:8px;">
+      Thresholds (conservative): MCA low flow ≤135 mL/min (≤60y) or ≤125 mL/min (>60y);
+      Hemispheric low flow ≤280 mL/min (≤60y) or ≤260 mL/min (>60y).
+      Low flow defined if <em>either</em> threshold met.
+    </div>
+  </div>
+
+<script>
+function ageGroup(age) {
+  if (!age || isNaN(age)) return null;
+  return age <= 60 ? 'leq60' : 'gt60';
+}
+
+function thresholdsFor(age) {
+  const grp = ageGroup(age);
+  if (grp === 'leq60') {
+    return { mcaCut: 135, hemiCut: 280, label: '≤60y: MCA ≤135; Hemisphere ≤280' };
+  } else if (grp === 'gt60') {
+    return { mcaCut: 125, hemiCut: 260, label: '>60y: MCA ≤125; Hemisphere ≤260' };
+  }
+  return null;
+}
+
+function deriveA2() {
+  const a1Ipsi = parseFloat(document.getElementById('a1_ipsi').value);
+  const a1Contra = parseFloat(document.getElementById('a1_contra').value);
+  const hypo = document.getElementById('a1_hypo').checked;
+  let a2 = null;
+  if (hypo) {
+    if (!isNaN(a1Contra)) a2 = a1Contra / 2.0;
+  } else {
+    if (!isNaN(a1Ipsi)) a2 = a1Ipsi;
+  }
+  const msg = document.getElementById('a2msg');
+  if (a2 !== null) {
+    document.getElementById('aca').value = Math.round(a2);
+    msg.textContent = 'A2 filled as ' + Math.round(a2) + ' mL/min.';
+  } else {
+    msg.textContent = 'Enter A1 values first (and select hypoplasia if applicable).';
+  }
+}
+
+function calculate() {
+  const age = parseFloat(document.getElementById('age').value);
+  const mca = parseFloat(document.getElementById('mca').value);
+  const aca = parseFloat(document.getElementById('aca').value);
+  const pca = parseFloat(document.getElementById('pca').value);
+  const bz = document.querySelector('input[name="bz"]:checked')?.value === 'yes';
+
+  const cuts = thresholdsFor(age);
+  const cutoffsDiv = document.getElementById('cutoffs');
+  const riskDiv = document.getElementById('risk');
+  const hemisInput = document.getElementById('hemis');
+
+  if (!cuts) {
+    riskDiv.innerHTML = 'Please enter a valid age.';
+    return;
+  }
+  cutoffsDiv.textContent = cuts.label;
+
+  if (isNaN(mca) || isNaN(aca) || isNaN(pca)) {
+    riskDiv.innerHTML = 'Please enter MCA, ACA (A2), and PCA (P2) flows.';
+    return;
+  }
+
+  const hemis = mca + aca + pca;
+  hemisInput.value = Math.round(hemis);
+
+  const lowMCA = mca <= cuts.mcaCut;
+  const lowHemi = hemis <= cuts.hemiCut;
+  const lowFlow = lowMCA || lowHemi;
+
+  let category = '';
+  let tag = '';
+  let details = '';
+
+  if (lowFlow && bz) {
+    category = 'Very High Risk';
+    tag = '<span class="tag high">~30%+ recurrence at 1 year</span>';
+    details = 'Low flow + borderzone infarct. Intensify surveillance and management; consider trials.';
+  } else if (lowFlow && !bz) {
+    category = 'High Risk';
+    tag = '<span class="tag high">~21% recurrence at 1 year</span>';
+    details = 'Low flow on QMRA; even with therapy, recurrence risk is elevated.';
+  } else if (!lowFlow && bz) {
+    category = 'Intermediate Risk';
+    tag = '<span class="tag intermediate">~29% recurrence at 1 year</span>';
+    details = 'Borderzone infarct suggests hemodynamic mechanism despite normal flows.';
+  } else {
+    category = 'Lower Risk';
+    tag = '<span class="tag low">~4–6% recurrence at 1 year</span>';
+    details = 'Normal flows and no borderzone pattern; continue aggressive medical therapy and routine follow‑up.';
+  }
+
+  riskDiv.innerHTML = '<b>' + category + '</b> ' + tag + '<br/>' +
+    '<b>MCA:</b> ' + mca + ' mL/min (cutoff ' + cuts.mcaCut + ')' +
+    ' | <b>Hemispheric:</b> ' + Math.round(hemis) + ' mL/min (cutoff ' + cuts.hemiCut + ')' +
+    (bz ? ' | <b>Borderzone:</b> Yes' : ' | <b>Borderzone:</b> No') +
+    '<br/>' + details;
+}
+</script>
+</body>
+</html>
